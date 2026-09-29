@@ -9,7 +9,7 @@ const km = v => Number.isFinite(v) ? v.toFixed(1) + ' km' : '—';
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const palettes = {residence:['#edf1d9','#c7dfc1','#89bdaa','#4c938d','#245d70'], workplace:['#eff0d9','#c7daca','#89bdb9','#4b939f','#235c79']};
 const seriesNames = {TAB1830:'BAS', TAB5850:'RAMS', TAB333:'RAMS legacy'};
-const state = {source:'TAB1830',year:2024,sex:'total',side:'residence',code:'',metric:'share',minimum:50,limit:150,showLinks:true};
+const state = {source:'TAB1830',year:2024,sex:'total',side:'residence',code:'',metric:'share',flow:'both',minimum:1,limit:'auto',showLinks:true};
 let catalog, nodes, geo, trendData, current, map, polygons, lines, dots, nationalBounds;
 let nodeIndex = new Map(), polygonIndex = new Map(), bundleCache = new Map(), requestId = 0, visibleEdges = [], eligibleEdges = [], breaks = [], bins = [];
 const renderer = () => L.canvas({padding:.4});
@@ -59,9 +59,25 @@ function updatePolygons() {
   polygonIndex.forEach((layer,code)=>layer.setTooltipContent(tooltip(code)));
   if (state.code) polygonIndex.get(state.code).bringToFront();
 }
-function scopeEdges() {
-  const i = selectedIndex(), r = state.side==='residence';
-  return current.links.filter(e=>e[0]!==e[1] && (i===undefined || e[r?0:1]===i)).sort((a,b)=>b[2]-a[2] || a[0]-b[0] || a[1]-b[1]);
+function scopeEdges(mode=state.flow) {
+  const i=selectedIndex();
+  return current.links.filter(e=>e[0]!==e[1] && (i===undefined || mode==='all' ||
+    (mode==='outgoing'?e[0]===i:mode==='incoming'?e[1]===i:e[0]===i||e[1]===i)))
+    .sort((a,b)=>b[2]-a[2] || a[0]-b[0] || a[1]-b[1]);
+}
+function drawingLimit() {
+  if(state.limit==='all')return Infinity;
+  if(state.limit==='auto')return state.code&&state.flow!=='all'?Infinity:500;
+  return Number(state.limit);
+}
+function edgeColor(e) {
+  const i=selectedIndex();
+  return i===undefined?'#266e79':e[0]===i?'#267b83':e[1]===i?'#975788':'#87999b';
+}
+function updateLineKey() {
+  const keys=state.code?[['#267b83','Outgoing from selected municipality'],['#975788','Incoming to selected municipality']]:[['#266e79','Residence → workplace']];
+  if(state.code&&state.flow==='all')keys.push(['#87999b','Other national connections']);
+  $('line-keys').innerHTML=keys.map(([c,label])=>`<div class="line-key"><span style="background:${c}"></span>${label}</div>`).join('');
 }
 function curve(edge) {
   const a=nodes[edge[0]], b=nodes[edge[1]], p=map.project([a.latitude,a.longitude],6), q=map.project([b.latitude,b.longitude],6);
@@ -73,26 +89,32 @@ function curve(edge) {
 function updateLinks() {
   if (!current) return;
   lines.clearLayers();dots.clearLayers();
-  const scoped=scopeEdges();eligibleEdges=scoped.filter(e=>e[2]>=state.minimum);visibleEdges=state.showLinks?eligibleEdges.slice(0,state.limit):[];
+  const scoped=scopeEdges();eligibleEdges=scoped.filter(e=>e[2]>=state.minimum);visibleEdges=state.showLinks?eligibleEdges.slice(0,drawingLimit()):[];
   const sum=scoped.reduce((s,e)=>s+e[2],0),shown=visibleEdges.reduce((s,e)=>s+e[2],0);
-  const scope=state.code?nodes[selectedIndex()].municipality_name:'Sweden';
-  $('link-summary').textContent=`${nf(visibleEdges.length)} of ${nf(eligibleEdges.length)} qualifying links · ${sum?pct(shown/sum):'0.0%'} of ${scope}'s external persons shown`;
+  const i=selectedIndex(),local=state.code&&state.flow!=='all';
+  const direction=local?` · ${nf(visibleEdges.filter(e=>e[0]===i).length)} outgoing + ${nf(visibleEdges.filter(e=>e[1]===i).length)} incoming`:'';
+  $('link-summary').textContent=`${nf(visibleEdges.length)} / ${nf(eligibleEdges.length)} qualifying links shown${direction} · ${sum?pct(shown/sum):'0.0%'} of external weight in scope`;
+  $('flow-help').textContent=state.code?(state.flow==='both'?'Both directions are drawn separately. Colours identify outgoing and incoming links.':state.flow==='all'?'All national connections remain in scope. The selected municipality is highlighted.':`${state.flow==='outgoing'?'Residence → workplace: outgoing from':'Residence → workplace: incoming to'} ${nodes[i].municipality_name}.`):'Select a municipality to explore its outgoing and incoming links together.';
+  $('limit-help').textContent=state.limit==='auto'?(local?'Automatic: all qualifying links for the selected municipality.':'Automatic: 500 strongest national links. Select All qualifying links to remove the cap.'):state.limit==='all'?'Every qualifying link is drawn.':`Up to ${nf(Number(state.limit))} strongest links are drawn.`;
   $('clear-selection').hidden=!state.code;
-  const max=visibleEdges[0]?.[2]||1,lineColor=state.side==='residence'?'#266e79':'#735d94';
+  const max=visibleEdges[0]?.[2]||1;
   visibleEdges.slice().reverse().forEach(e=>{
-    const points=curve(e),weight=.6+3.6*Math.sqrt(e[2]/max);
-    const line=L.polyline(points,{renderer:lines._renderer,color:lineColor,weight,opacity:state.code?.68:.4,smoothFactor:.3}).addTo(lines);
+    const points=curve(e),weight=.35+3.85*Math.sqrt(e[2]/max),lineColor=edgeColor(e),opacity=local ? .55 : (state.code&&(e[0]===i||e[1]===i) ? .7 : .33);
+    const line=L.polyline(points,{renderer:lines._renderer,color:lineColor,weight,opacity,smoothFactor:.3}).addTo(lines);
     const a=nodes[e[0]],b=nodes[e[1]];
-    line.bindTooltip(`<strong>${esc(a.municipality_name)} → ${esc(b.municipality_name)}</strong><br>${nf(e[2])} persons · ${state.year}`,{sticky:true});
+    const reverse=current.edgeLookup.get(`${e[1]}:${e[0]}`);
+    line.bindTooltip(`<strong>${esc(a.municipality_name)} → ${esc(b.municipality_name)}</strong><br>${nf(e[2])} persons · ${state.year}<br><small>Reverse ${esc(b.municipality_name)} → ${esc(a.municipality_name)}: ${reverse===undefined?'no positive published link':nf(reverse)+' persons'}</small>`,{sticky:true});
+    line.on('mouseover',()=>line.setStyle({weight:weight+1.5,opacity:1}));
+    line.on('mouseout',()=>line.setStyle({weight,opacity}));
     // Arrowhead is projected at the current zoom, so its size stays legible.
     const p=map.latLngToLayerPoint(points[18]),q=map.latLngToLayerPoint(points[19]);
     const ang=Math.atan2(q.y-p.y,q.x-p.x),size=4+weight;
     const left=L.point(q.x-size*Math.cos(ang-.45),q.y-size*Math.sin(ang-.45));
     const right=L.point(q.x-size*Math.cos(ang+.45),q.y-size*Math.sin(ang+.45));
-    L.polyline([map.layerPointToLatLng(left),points[19],map.layerPointToLatLng(right)],{renderer:lines._renderer,color:lineColor,weight:Math.max(.7,weight*.6),opacity:state.code?.75:.5,interactive:false}).addTo(lines);
+    L.polyline([map.layerPointToLatLng(left),points[19],map.layerPointToLatLng(right)],{renderer:lines._renderer,color:lineColor,weight:Math.max(.6,weight*.6),opacity:local?.65:.4,interactive:false}).addTo(lines);
   });
   if(state.code){const n=nodes[selectedIndex()];L.circleMarker([n.latitude,n.longitude],{radius:5,color:'#fff',weight:1.7,fillColor:'#bd8c19',fillOpacity:1,interactive:false}).addTo(dots);}
-  document.querySelector('.line-key span').style.background=lineColor;
+  updateLineKey();
 }
 function aggregate() {
   const r=state.side==='residence',totalKey=r?'resident_workers_observed':'workplace_workers_observed',extKey=r?'out_workers':'in_workers',distKey=field('distance');
@@ -108,10 +130,17 @@ function updateProfile() {
   $('primary-label').textContent=r?'Employed residents':'Registered workplace workers';
   $('primary-value').textContent=nf(v.total);$('external-label').textContent=r?'Work elsewhere':'Live elsewhere';
   $('external-value').textContent=nf(v.external);$('share-value').textContent=pct(v.share);$('within-value').textContent=nf(v.within);$('distance-value').textContent=km(v.distance);
-  $('partners-title').textContent=state.code?(r?'Main work destinations':'Main residential origins'):'Strongest connections';
-  const partners=scopeEdges().slice(0,8),max=partners[0]?.[2]||1;
-  $('partners').innerHTML=partners.map(e=>{const dest=e[r?1:0],label=state.code?nodes[dest].municipality_name:`${nodes[e[0]].municipality_name} → ${nodes[e[1]].municipality_name}`;return `<li><button class="partner-button" data-code="${state.code?nodes[dest].municipality_code:nodes[e[0]].municipality_code}" title="Explore ${esc(nodes[state.code?dest:e[0]].municipality_name)}"><span class="partner-name"><i class="partner-bar" style="width:${e[2]/max*100}%"></i><span>${esc(label)}</span></span><strong class="partner-value">${nf(e[2])}</strong></button></li>`;}).join('')||'<li>No published external connections.</li>';
+  $('two-way-profile').hidden=!state.code;$('origins-section').hidden=!state.code;
+  if(state.code){const m=current.metrics[selectedIndex()];$('incoming-value').textContent=nf(m.in_workers);$('outgoing-value').textContent=nf(m.out_workers);$('net-value').textContent=(m.net_in_workers>0?'+':'')+nf(m.net_in_workers);$('combined-value').textContent=nf(m.in_workers+m.out_workers);}
+  $('partners-title').textContent=state.code?'Main work destinations':'Strongest connections';
+  $('partners-count').textContent=state.code?'TOP 5':'TOP 8';
+  renderPartners('partners',state.code?'outgoing':'all',state.code?5:8);
+  if(state.code)renderPartners('origins','incoming',5);
   updateTrend();
+}
+function renderPartners(id,mode,limit) {
+  const partners=scopeEdges(mode).slice(0,limit),max=partners[0]?.[2]||1;
+  $(id).innerHTML=partners.map(e=>{const dest=mode==='incoming'?e[0]:e[1],target=state.code?dest:e[0],label=state.code?nodes[dest].municipality_name:`${nodes[e[0]].municipality_name} → ${nodes[e[1]].municipality_name}`;return `<li><button class="partner-button" data-code="${nodes[target].municipality_code}" title="Explore ${esc(nodes[target].municipality_name)}"><span class="partner-name"><i class="partner-bar" style="width:${e[2]/max*100}%"></i><span>${esc(label)}</span></span><strong class="partner-value">${nf(e[2])}</strong></button></li>`;}).join('')||'<li>No published external connections.</li>';
 }
 function updateTrend() {
   if(!trendData){$('trend').textContent='Loading time series…';return;}
@@ -143,7 +172,7 @@ function updateHeader() {
   const name=state.code?nodes[selectedIndex()].municipality_name:'Sweden';
   $('map-title').textContent=`${name}, ${state.year}`;
   $('series-label').textContent=`${seriesNames[state.source]} · ${state.sex==='total'?'ALL PERSONS':state.sex.toUpperCase()} · ${state.side.toUpperCase()}`;
-  $('side-help').textContent=state.side==='residence'?'Where residents work outside their municipality.':'Where workers live outside their workplace municipality.';
+  $('side-help').textContent=(state.side==='residence'?'Indicators describe residents and their workplaces.':'Indicators describe workers and their home municipalities.')+' Connection direction is set separately.';
   document.querySelector('#metric option[value=entropy]').textContent=state.side==='residence'?'Destination diversity':'Origin diversity';
   $('method-note').textContent=notes();$('focus-map').disabled=!state.code;
   syncShareURL();
@@ -167,7 +196,7 @@ async function loadPartition() {
   try {
     if(!bundleCache.has(key))bundleCache.set(key,await fetchJSON(`data/${key}.json.gz`));
     if(id!==requestId)return;
-    current=bundleCache.get(key);redraw();$('loading').hidden=true;$('export').disabled=false;
+    current=bundleCache.get(key);if(!current.edgeLookup)current.edgeLookup=new Map(current.links.map(e=>[`${e[0]}:${e[1]}`,e[2]]));redraw();$('loading').hidden=true;$('export').disabled=false;
   }catch(error){if(id!==requestId)return;$('loading').hidden=true;$('error').textContent=`Could not load this layer. ${error.message} Please reload the page or select another year.`;$('error').hidden=false;}
 }
 function fillMunicipalities(query='') {
@@ -185,7 +214,7 @@ function downloadCSV(){
   const head=['source_table','year','sex','origin_code','origin_name','destination_code','destination_name','persons'];
   const rows=eligibleEdges.map(e=>[state.source,state.year,state.sex,nodes[e[0]].municipality_code,nodes[e[0]].municipality_name,nodes[e[1]].municipality_code,nodes[e[1]].municipality_name,e[2]]);
   const blob=new Blob(['\ufeff'+[head,...rows].map(row=>row.map(quoted).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');
-  a.href=url;a.download=`SCB_${state.source}_${state.year}_${state.sex}_${state.code||'Sweden'}_${state.side}_min${state.minimum}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  a.href=url;a.download=`SCB_${state.source}_${state.year}_${state.sex}_${state.flow==='all'?'Sweden':state.code||'Sweden'}_${state.flow}_min${state.minimum}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 function restoreState(){
   const params=new URLSearchParams(location.hash.slice(1));
@@ -195,10 +224,12 @@ function restoreState(){
   if(['residence','workplace'].includes(params.get('side')))state.side=params.get('side');
   if(nodeIndex.has(params.get('code')))state.code=params.get('code');
   if(['share','workers','distance','degree','entropy'].includes(params.get('metric')))state.metric=params.get('metric');
+  if(['both','outgoing','incoming','all'].includes(params.get('flow')))state.flow=params.get('flow');
   if(params.has('minimum')&&Number.isFinite(+params.get('minimum')))state.minimum=Math.max(1,Math.min(1000000,Math.round(+params.get('minimum'))));
-  if([50,150,300,600].includes(+params.get('limit')))state.limit=+params.get('limit');
+  if(['auto','all','50','100','150','250','300','500','600','1000','3000'].includes(params.get('limit')))state.limit=params.get('limit');
   if(params.get('showLinks')==='false')state.showLinks=false;
-  ['source','sex','metric','minimum','limit'].forEach(key=>$(key).value=state[key]);$('show-links').checked=state.showLinks;
+  if(![...$('limit').options].some(o=>o.value===String(state.limit))){const option=document.createElement('option');option.value=String(state.limit);option.textContent=nf(Number(state.limit))+' connections';$('limit').appendChild(option);}
+  ['source','sex','metric','flow','minimum','limit'].forEach(key=>$(key).value=state[key]);$('show-links').checked=state.showLinks;
   document.querySelectorAll('[data-side]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.side===state.side)));
 }
 function bindUI(){
@@ -211,12 +242,14 @@ function bindUI(){
   $('municipality').onchange=()=>selectMunicipality($('municipality').value);
   document.querySelectorAll('[data-side]').forEach(b=>b.onclick=()=>{state.side=b.dataset.side;document.querySelectorAll('[data-side]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.side===state.side)));redraw();});
   $('metric').onchange=()=>{state.metric=$('metric').value;redraw();};
+  $('flow').onchange=()=>{state.flow=$('flow').value;updateLinks();updateHeader();};
   $('minimum').onchange=()=>{state.minimum=Math.max(1,Math.min(1000000,Math.round(+$('minimum').value)||1));$('minimum').value=state.minimum;updateLinks();updateHeader();};
-  $('limit').onchange=()=>{state.limit=+$('limit').value;updateLinks();updateHeader();};
+  $('limit').onchange=()=>{state.limit=$('limit').value;updateLinks();updateHeader();};
   $('show-links').onchange=()=>{state.showLinks=$('show-links').checked;updateLinks();updateHeader();};
   $('reset-map').onclick=()=>map.fitBounds(nationalBounds,{padding:[26,32],animate:false});$('focus-map').onclick=focusMap;
   $('clear-selection').onclick=()=>selectMunicipality('');$('export').onclick=downloadCSV;
   $('partners').onclick=e=>{const b=e.target.closest('[data-code]');if(b)selectMunicipality(b.dataset.code,true);};
+  $('origins').onclick=e=>{const b=e.target.closest('[data-code]');if(b)selectMunicipality(b.dataset.code,true);};
   $('filters-toggle').onclick=()=>{const open=$('controls').classList.toggle('open');$('filters-toggle').setAttribute('aria-expanded',String(open));map.invalidateSize();};
   $('legend-toggle').onclick=()=>{const open=document.querySelector('.map-legend').classList.toggle('expanded');$('legend-toggle').setAttribute('aria-expanded',String(open));$('legend-toggle').lastElementChild.textContent=open?'−':'+';};
   $('methods-open').onclick=()=>$('methods').showModal();$('methods-close').onclick=()=>$('methods').close();
