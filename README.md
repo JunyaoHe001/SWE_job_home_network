@@ -11,7 +11,7 @@ Intended public URL: https://JunyaoHe001.github.io/SWE_job_home_network/
 - Click a municipality, or search its name or four-digit code.
 - Map external share, external persons, weighted distance, partner count or diversity.
 - Show both incoming and outgoing links together, or filter to one direction or all national links. Teal means outgoing and purple incoming relative to the selected municipality.
-- The default minimum is one person. Automatic display shows the strongest 500 national links, and all qualifying links for a selected municipality. Choose All qualifying links to remove the cap at any scale.
+- The default minimum is one person and the default display cap is 1,000 links. Drag the link-count slider or enter an exact number to adjust the cap. Its range expands to include all qualifying links in the current scope. Automatic mode shows the strongest 1,000 national links and all qualifying links for a selected municipality. Choose All qualifying links to remove the cap at any scale.
 - Indicator perspective is independent of connection direction. Selected profiles show incoming, outgoing, net incoming, and both partner lists.
 - Hover a connection to compare its published reverse link.
 - Inspect complete-matrix indicators, top partners and a within-series trend.

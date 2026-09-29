@@ -9,7 +9,9 @@ const km = v => Number.isFinite(v) ? v.toFixed(1) + ' km' : '—';
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const palettes = {residence:['#edf1d9','#c7dfc1','#89bdaa','#4c938d','#245d70'], workplace:['#eff0d9','#c7daca','#89bdb9','#4b939f','#235c79']};
 const seriesNames = {TAB1830:'BAS', TAB5850:'RAMS', TAB333:'RAMS legacy'};
-const state = {source:'TAB1830',year:2024,sex:'total',side:'residence',code:'',metric:'share',flow:'both',minimum:1,limit:'auto',showLinks:true};
+const state = {source:'TAB1830',year:2024,sex:'total',side:'residence',code:'',metric:'share',flow:'both',minimum:1,limit:'1000',showLinks:true};
+const maxLinkLimit=290*289;
+let limitUpdateTimer;
 let catalog, nodes, geo, trendData, current, map, polygons, lines, dots, nationalBounds;
 let nodeIndex = new Map(), polygonIndex = new Map(), bundleCache = new Map(), requestId = 0, visibleEdges = [], eligibleEdges = [], breaks = [], bins = [];
 const renderer = () => L.canvas({padding:.4});
@@ -67,8 +69,28 @@ function scopeEdges(mode=state.flow) {
 }
 function drawingLimit() {
   if(state.limit==='all')return Infinity;
-  if(state.limit==='auto')return state.code&&state.flow!=='all'?Infinity:500;
+  if(state.limit==='auto')return state.code&&state.flow!=='all'?Infinity:1000;
   return Number(state.limit);
+}
+function syncLimitControls() {
+  if(![...$('limit').options].some(o=>o.value===state.limit)){
+    let option=$('custom-limit');
+    if(!option){option=document.createElement('option');option.id='custom-limit';$('limit').appendChild(option);}
+    option.value=state.limit;option.textContent=`Custom: ${nf(Number(state.limit))}`;
+  }
+  $('limit').value=state.limit;
+  const count=Number.isFinite(drawingLimit())?drawingLimit():Math.max(1,eligibleEdges.length);
+  const maximum=Math.max(1000,eligibleEdges.length,count);
+  $('limit-slider').max=maximum;$('limit-slider').value=count;
+  $('limit-number').value=count;$('limit-slider-max').textContent=nf(maximum);
+  $('limit-slider').setAttribute('aria-valuetext',`${nf(count)} connections`);
+}
+function setManualLimit(value,commit=false) {
+  if(value==='')return;
+  state.limit=String(Math.max(1,Math.min(maxLinkLimit,Math.round(Number(value)||1))));
+  syncLimitControls();clearTimeout(limitUpdateTimer);
+  if(commit){updateLinks();updateHeader();}
+  else limitUpdateTimer=setTimeout(()=>{updateLinks();updateHeader();},100);
 }
 function edgeColor(e) {
   const i=selectedIndex();
@@ -95,7 +117,8 @@ function updateLinks() {
   const direction=local?` · ${nf(visibleEdges.filter(e=>e[0]===i).length)} outgoing + ${nf(visibleEdges.filter(e=>e[1]===i).length)} incoming`:'';
   $('link-summary').textContent=`${nf(visibleEdges.length)} / ${nf(eligibleEdges.length)} qualifying links shown${direction} · ${sum?pct(shown/sum):'0.0%'} of external weight in scope`;
   $('flow-help').textContent=state.code?(state.flow==='both'?'Both directions are drawn separately. Colours identify outgoing and incoming links.':state.flow==='all'?'All national connections remain in scope. The selected municipality is highlighted.':`${state.flow==='outgoing'?'Residence → workplace: outgoing from':'Residence → workplace: incoming to'} ${nodes[i].municipality_name}.`):'Select a municipality to explore its outgoing and incoming links together.';
-  $('limit-help').textContent=state.limit==='auto'?(local?'Automatic: all qualifying links for the selected municipality.':'Automatic: 500 strongest national links. Select All qualifying links to remove the cap.'):state.limit==='all'?'Every qualifying link is drawn.':`Up to ${nf(Number(state.limit))} strongest links are drawn.`;
+  $('limit-help').textContent=state.limit==='auto'?(local?'Automatic: all qualifying links for the selected municipality.':'Automatic: 1,000 strongest national links. Drag the slider to adjust.'):state.limit==='all'?'Every qualifying link is drawn. Drag the slider to set a cap.':`Up to ${nf(Number(state.limit))} strongest links are drawn. Drag the slider or enter a number.`;
+  syncLimitControls();
   $('clear-selection').hidden=!state.code;
   const max=visibleEdges[0]?.[2]||1;
   visibleEdges.slice().reverse().forEach(e=>{
@@ -226,10 +249,11 @@ function restoreState(){
   if(['share','workers','distance','degree','entropy'].includes(params.get('metric')))state.metric=params.get('metric');
   if(['both','outgoing','incoming','all'].includes(params.get('flow')))state.flow=params.get('flow');
   if(params.has('minimum')&&Number.isFinite(+params.get('minimum')))state.minimum=Math.max(1,Math.min(1000000,Math.round(+params.get('minimum'))));
-  if(['auto','all','50','100','150','250','300','500','600','1000','3000'].includes(params.get('limit')))state.limit=params.get('limit');
+  const requestedLimit=params.get('limit');
+  if(['auto','all'].includes(requestedLimit))state.limit=requestedLimit;
+  else if(requestedLimit!==null&&Number.isInteger(Number(requestedLimit))&&Number(requestedLimit)>=1&&Number(requestedLimit)<=maxLinkLimit)state.limit=String(Number(requestedLimit));
   if(params.get('showLinks')==='false')state.showLinks=false;
-  if(![...$('limit').options].some(o=>o.value===String(state.limit))){const option=document.createElement('option');option.value=String(state.limit);option.textContent=nf(Number(state.limit))+' connections';$('limit').appendChild(option);}
-  ['source','sex','metric','flow','minimum','limit'].forEach(key=>$(key).value=state[key]);$('show-links').checked=state.showLinks;
+  ['source','sex','metric','flow','minimum'].forEach(key=>$(key).value=state[key]);$('show-links').checked=state.showLinks;syncLimitControls();
   document.querySelectorAll('[data-side]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.side===state.side)));
 }
 function bindUI(){
@@ -244,7 +268,11 @@ function bindUI(){
   $('metric').onchange=()=>{state.metric=$('metric').value;redraw();};
   $('flow').onchange=()=>{state.flow=$('flow').value;updateLinks();updateHeader();};
   $('minimum').onchange=()=>{state.minimum=Math.max(1,Math.min(1000000,Math.round(+$('minimum').value)||1));$('minimum').value=state.minimum;updateLinks();updateHeader();};
-  $('limit').onchange=()=>{state.limit=$('limit').value;updateLinks();updateHeader();};
+  $('limit').onchange=()=>{clearTimeout(limitUpdateTimer);state.limit=$('limit').value;updateLinks();updateHeader();};
+  $('limit-slider').oninput=()=>setManualLimit($('limit-slider').value);
+  $('limit-slider').onchange=()=>setManualLimit($('limit-slider').value,true);
+  $('limit-number').oninput=()=>setManualLimit($('limit-number').value);
+  $('limit-number').onchange=()=>setManualLimit($('limit-number').value||'1',true);
   $('show-links').onchange=()=>{state.showLinks=$('show-links').checked;updateLinks();updateHeader();};
   $('reset-map').onclick=()=>map.fitBounds(nationalBounds,{padding:[26,32],animate:false});$('focus-map').onclick=focusMap;
   $('clear-selection').onclick=()=>selectMunicipality('');$('export').onclick=downloadCSV;
