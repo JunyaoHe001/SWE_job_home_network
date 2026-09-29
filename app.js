@@ -1,4 +1,5 @@
 /* SCB municipal network atlas. All paths are relative for GitHub project Pages. */
+(() => {
 'use strict';
 const $ = id => document.getElementById(id);
 const fmt = new Intl.NumberFormat('en-GB', {maximumFractionDigits: 0});
@@ -9,7 +10,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>'
 const palettes = {residence:['#edf1d9','#c7dfc1','#89bdaa','#4c938d','#245d70'], workplace:['#eff0d9','#c7daca','#89bdb9','#4b939f','#235c79']};
 const seriesNames = {TAB1830:'BAS', TAB5850:'RAMS', TAB333:'RAMS legacy'};
 const state = {source:'TAB1830',year:2024,sex:'total',side:'residence',code:'',metric:'share',minimum:50,limit:150,showLinks:true};
-let catalog, nodes, geo, history, current, map, polygons, lines, dots, nationalBounds;
+let catalog, nodes, geo, trendData, current, map, polygons, lines, dots, nationalBounds;
 let nodeIndex = new Map(), polygonIndex = new Map(), bundleCache = new Map(), requestId = 0, visibleEdges = [], eligibleEdges = [], breaks = [], bins = [];
 const renderer = () => L.canvas({padding:.4});
 async function fetchJSON(path) {
@@ -113,10 +114,10 @@ function updateProfile() {
   updateTrend();
 }
 function updateTrend() {
-  if(!history){$('trend').textContent='Loading time series…';return;}
+  if(!trendData){$('trend').textContent='Loading time series…';return;}
   const r=state.side==='residence',years=catalog.sources[state.source].years, i=selectedIndex();
   const pts=years.map(year=>{
-    const rows=history.partitions[`${state.source}_${year}_${state.sex}`];
+    const rows=trendData.partitions[`${state.source}_${year}_${state.sex}`];
     const chosen=i===undefined?rows:[rows[i]],total=chosen.reduce((s,m)=>s+(m[r?0:1]||0),0),ext=chosen.reduce((s,m)=>s+(m[r?2:3]||0),0);
     const p=catalog.partitions.find(p=>p.source_table===state.source&&p.year===year&&p.sex===state.sex);
     return{year,value:total?ext/total:null,regime:p.statistical_regime,event:p.method_event};
@@ -145,7 +146,19 @@ function updateHeader() {
   $('side-help').textContent=state.side==='residence'?'Where residents work outside their municipality.':'Where workers live outside their workplace municipality.';
   document.querySelector('#metric option[value=entropy]').textContent=state.side==='residence'?'Destination diversity':'Origin diversity';
   $('method-note').textContent=notes();$('focus-map').disabled=!state.code;
-  const params=new URLSearchParams(state);window.history.replaceState(null,'','#'+params.toString());
+  syncShareURL();
+}
+function syncShareURL() {
+  const hash='#'+new URLSearchParams(state).toString();
+  if(window.location.hash===hash)return;
+  try {
+    // Keep the receiver intact for browser-installed History wrappers.
+    const browserHistory=window.history;
+    browserHistory.replaceState(browserHistory.state,'',hash);
+  } catch(error) {
+    // Saving shareable filters is optional and must never interrupt rendering.
+    console.warn('Could not update the share URL. The map remains available.',error);
+  }
 }
 function redraw(){if(!current)return;updateHeader();updatePolygons();updateLinks();updateProfile();}
 async function loadPartition() {
@@ -221,8 +234,9 @@ async function init(){
     lines=L.layerGroup().addTo(map);lines._renderer=renderer();dots=L.layerGroup().addTo(map);
     map.on('zoomend',()=>{if(current)updateLinks();});
     bindUI();await loadPartition();
-    history=await fetchJSON('data/history.json.gz');updateTrend();
+    trendData=await fetchJSON('data/history.json.gz');updateTrend();
     window.__atlas={state,nodes,catalog,get current(){return current;},get eligibleEdges(){return eligibleEdges;},get visibleEdges(){return visibleEdges;},map};
   }catch(error){$('loading').hidden=true;$('error').textContent=`The atlas could not start. ${error.message} Please reload the page.`;$('error').hidden=false;console.error(error);}
 }
 init();
+})();
