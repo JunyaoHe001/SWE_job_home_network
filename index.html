@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Explore Sweden's municipal residence-to-workplace networks. Official SCB statistics, 2004-2024, across 290 municipalities.">
+  <meta name="theme-color" content="#173e4d">
+  <title>Sweden | Job-home networks</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="vendor/leaflet.css"><link rel="stylesheet" href="style.css">
+  <script defer src="vendor/leaflet.js"></script><script defer src="app.js"></script>
+</head>
+<body>
+<header class="masthead">
+  <a class="brand" href="./" aria-label="Swedish job-home network home"><span class="swedish-flag" aria-hidden="true"></span><span><span class="eyebrow">SWEDEN · MUNICIPAL NETWORK ATLAS</span><h1>Where we live. Where we work.</h1></span></a>
+  <nav><span class="edition">SCB · 2004-2024</span><button class="text-button" id="methods-open">About the data <span aria-hidden="true">↗</span></button><button class="mobile-toggle" id="filters-toggle" aria-expanded="false" aria-controls="controls">Filters</button></nav>
+</header>
+<main class="workspace">
+  <aside class="controls" id="controls" aria-label="Map controls">
+    <div class="panel-intro"><span class="eyebrow">EXPLORE THE NETWORK</span><p>Linking home<br>and workplace.</p></div>
+    <label class="field-label" for="source">01 <span>Statistical series</span></label>
+    <select id="source"><option value="TAB1830">BAS · 2020-2024</option><option value="TAB5850">RAMS · 2019-2021</option><option value="TAB333">RAMS legacy · 2004-2018</option></select>
+    <div class="year-heading"><label for="year">Year</label><output id="year-value">2024</output></div>
+    <input id="year" type="range" min="2020" max="2024" value="2024" step="1"><div class="range-labels"><span id="year-min">2020</span><span id="year-max">2024</span></div>
+    <label class="small-label" for="sex">Population</label><select id="sex"><option value="total">All persons</option><option value="women">Women</option><option value="men">Men</option></select>
+    <div class="section-rule"></div>
+    <label class="field-label" for="municipality">02 <span>Municipality</span></label>
+    <input id="search" type="search" placeholder="Find a name or code…" aria-label="Filter municipality list" autocomplete="off">
+    <select id="municipality"><option value="">All 290 municipalities</option></select>
+    <label class="small-label">Perspective</label><div class="segmented" aria-label="Network perspective"><button data-side="residence" aria-pressed="true">Residence</button><button data-side="workplace" aria-pressed="false">Workplace</button></div>
+    <p class="control-hint" id="side-help">Where residents work outside their municipality.</p>
+    <label class="small-label" for="metric">Colour municipalities by</label>
+    <select id="metric"><option value="share">External share</option><option value="workers">External workers</option><option value="distance">Mean external distance</option><option value="degree">Partners with ≥5 persons</option><option value="entropy">Destination diversity</option></select>
+    <div class="section-rule"></div>
+    <div class="field-label">03 <span>Visible connections</span></div>
+    <label class="small-label" for="minimum">Minimum persons per connection</label><input id="minimum" type="number" min="1" max="1000000" value="50" step="1">
+    <label class="small-label" for="limit">Show strongest</label><select id="limit"><option value="50">50 connections</option><option value="150" selected>150 connections</option><option value="300">300 connections</option><option value="600">600 connections</option></select>
+    <label class="checkbox"><input type="checkbox" id="show-links" checked> Show connections</label>
+    <button id="export" class="export-button">Download filtered links <span aria-hidden="true">↓</span></button>
+    <p class="fine-print">Map filters only affect connections.<br>Indicators use the full published matrix.</p>
+    <a class="repo-link" href="https://github.com/JunyaoHe001/SWE_job_home_network" target="_blank" rel="noreferrer">Data &amp; code on GitHub ↗</a>
+  </aside>
+  <section class="map-column" aria-label="Interactive network map">
+    <div class="map-heading"><div><span class="eyebrow" id="series-label">BAS · ALL PERSONS</span><h2 id="map-title">Sweden, 2024</h2></div><span class="live-pill"><i></i> 290 municipalities</span></div>
+    <div class="map-stage"><div id="map" aria-label="Map of Swedish municipalities"></div>
+      <div class="map-actions"><button id="reset-map" title="Zoom to all of Sweden">Sweden</button><button id="focus-map" title="Zoom to the selected municipality">Focus</button></div>
+      <div class="north-arrow" aria-label="North">N<span>↑</span></div>
+      <div class="map-legend"><button id="legend-toggle" class="legend-toggle" aria-expanded="false">Map key <span aria-hidden="true">+</span></button><strong id="legend-title">External share</strong><div id="legend-bins"></div><div class="line-key"><span></span> Residence → workplace</div><p>Width = persons · Curves are schematic</p></div>
+      <div id="loading" class="loading" role="status"><span class="spinner"></span> Loading official data…</div>
+      <div id="error" class="error" role="alert" hidden></div>
+    </div>
+    <div class="map-caption"><span id="link-summary">Preparing network…</span><button id="clear-selection" hidden>Clear selection ×</button></div>
+    <div class="method-note" id="method-note"></div>
+  </section>
+  <aside class="inspector" aria-label="Network statistics">
+    <div class="inspector-heading"><span class="eyebrow">NETWORK PROFILE</span><h2 id="profile-name">Sweden</h2><p id="profile-subtitle">Domestic municipal network</p></div>
+    <div class="primary-stat"><span id="primary-label">Employed residents</span><strong id="primary-value">—</strong><small id="primary-note">Observed in the domestic matrix</small></div>
+    <div class="stat-grid"><div><span id="external-label">Work elsewhere</span><strong id="external-value">—</strong></div><div><span>External share</span><strong id="share-value">—</strong></div><div><span>Within municipality</span><strong id="within-value">—</strong></div><div><span>Mean ext. distance</span><strong id="distance-value">—</strong></div></div>
+    <div class="chart-heading"><h3>External share over time</h3><span id="trend-range">2020-2024</span></div><div id="trend" class="trend"></div><p class="chart-footnote">Within selected series. Gaps mark methodological breaks.</p>
+    <div class="chart-heading"><h3 id="partners-title">Strongest connections</h3><span>TOP 8</span></div><ol id="partners" class="partners"></ol><p class="chart-footnote">Ranked using all external links, before map filters. Click to explore.</p>
+    <div class="read-map"><span class="eyebrow">READ THE MAP</span><p>Click a municipality to explore its network. Residence follows outgoing links; workplace follows incoming links.</p></div>
+  </aside>
+</main>
+<footer><span>Source: Statistics Sweden (SCB)</span><span>Boundaries: GISCO LAU 2024 · © EuroGeographics for the administrative boundaries</span></footer>
+<dialog id="methods"><div class="dialog-heading"><div><span class="eyebrow">DATA &amp; INTERPRETATION</span><h2>What this atlas measures</h2></div><button id="methods-close" aria-label="Close data notes">×</button></div>
+  <p>Each directed connection counts people with a registered residence in one Swedish municipality and a workplace in another. It is a residence-to-workplace association, not a count of trips, commuting frequency, migration or remote-working days.</p>
+  <h3>Three statistical series</h3><ul><li><a href="https://www.statistikdatabasen.scb.se/goto/en/ssd/AM0207PendlKomA04" target="_blank" rel="noreferrer">RAMS legacy · TAB333 · 2004-2018</a>: age scope changes in 2011; no employed persons aged 75+ from 2011. Classification also changes.</li><li><a href="https://www.statistikdatabasen.scb.se/goto/en/ssd/AM0207PendlKomA04N" target="_blank" rel="noreferrer">RAMS · TAB5850 · 2019-2021</a>: ages 16-74. The 2019 AGI transition changes the method. Armed Forces reporting changes from 2020.</li><li><a href="https://www.statistikdatabasen.scb.se/goto/en/ssd/ArRegPend2" target="_blank" rel="noreferrer">BAS · TAB1830 · 2020-2024</a>: ages 15-74. Entrepreneur classification changes in 2024. Disclosure protection affects small counts; published totals may differ from men + women. Unlocated workplaces are assigned to the residence municipality.</li></ul>
+  <p>Series remain separate. Changes across these breaks must not be interpreted as a harmonised time trend. “All persons” uses the independently published total and never adds it to the sex-specific layers.</p>
+  <h3>Indicators and display</h3><p>Residence indicators use a municipality's row in the full domestic matrix; workplace indicators use its column. External share excludes within-municipality links from the numerator and includes them in the denominator. National shares sum published counts first. Internal links are included in indicators but not drawn as curves.</p><p>Mean external distance is weighted by persons and uses great-circle distances between polygon centroids calculated in SWEREF 99 TM (EPSG:3006). It is not a road distance. Diversity is external-link Shannon entropy divided by ln(289). Partner count uses links of at least five persons. Undefined values appear as “—”.</p><p>Colour bins are quintiles across the 290 municipalities in the current layer; their ranges change with the filters. Network curves are schematic, with arrowheads pointing to the workplace. The minimum and connection cap affect drawing only. CSV export contains all external links meeting the threshold in the selected scope, without the display cap. Zero and missing cells are not in the browser link files.</p>
+  <h3>Geography and attribution</h3><p>The map uses <a href="https://ec.europa.eu/eurostat/web/gisco/geodata/statistical-units/local-administrative-units" target="_blank" rel="noreferrer">Eurostat GISCO LAU 2024</a>, Sweden, generalised at 1:1 million, in WGS84. All years use fixed 2024 boundaries. Matching municipality codes do not establish invariant historical boundaries; no geographic crosswalk has been applied.</p><p><strong>© EuroGeographics for the administrative boundaries.</strong> These administrative boundaries are provided for attributed, non-commercial use under the <a href="https://ec.europa.eu/eurostat/web/gisco/geodata/reference-data/administrative-units-statistical-units" target="_blank" rel="noreferrer">GISCO terms</a>. No external basemap or tile service is required. The atlas renders the bundled municipal polygons with Leaflet 1.9.4.</p>
+  <p class="dialog-end">Coverage: 290 Swedish municipalities. Foreign workplaces and unknown-region nodes are outside this domestic network. Data supplied in the SCB job-home web package generated 29 September 2026.</p>
+</dialog>
+<noscript>This atlas requires JavaScript to load and explore the data.</noscript>
+</body></html>
